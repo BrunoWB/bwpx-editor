@@ -105,6 +105,13 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
   const [modalContent, setModalContent] = useState<{ title: string; text: string } | null>(null);
   const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
 
+  // Stores the previous selection rect when performing an additive (Shift/Cmd) select drag
+  const additiveSelectionBase = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Tracks the grid-coord where a floating-selection move drag started (for delta calculation)
+  const floatingSelDragStart = useRef<{ x: number; y: number } | null>(null);
+  // Origin of the selection when a move drag started (for delta offset)
+  const floatingSelOrigin = useRef<{ x: number; y: number } | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -263,6 +270,23 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
 
     // Draw selection marquee if active
     if (selection && selection.active) {
+      // If there is floating pixel data, draw it at the selection position (opaque: black = dark tile)
+      if (selection.data) {
+        for (let r = 0; r < selection.data.height; r++) {
+          for (let c = 0; c < selection.data.width; c++) {
+            const px = selection.x + c;
+            const py = selection.y + r;
+            if (selection.data.get(c, r)) {
+              ctx.fillStyle = '#00e5a3'; // lit pixel
+            } else {
+              ctx.fillStyle = '#1b1e25'; // dark pixel — opaque, overwrites underneath
+            }
+            ctx.fillRect(px * zoom, py * zoom, zoom, zoom);
+          }
+        }
+      }
+
+      // Marquee dashes
       ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
@@ -353,13 +377,63 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
     const coords = getGridCoords(e.clientX, e.clientY);
     if (!coords) return;
 
-    // Shift key enables rapid selection
-    if (e.shiftKey) {
+    // --- Select tool: handle click-inside-selection ---
+    if (activeTool === 'select' && selection?.active) {
+      const inside =
+        coords.x >= selection.x &&
+        coords.x < selection.x + selection.w &&
+        coords.y >= selection.y &&
+        coords.y < selection.y + selection.h;
+
+      if (inside) {
+        if (e.shiftKey || e.metaKey) {
+          // Additive drag: remember the current selection as the base to union with
+          additiveSelectionBase.current = { x: selection.x, y: selection.y, w: selection.w, h: selection.h };
+          setIsDrawing(true);
+          setStartPos(coords);
+          setDragCurrentPos(coords);
+        } else {
+          // Lift the selection: capture pixels, erase source, begin move drag
+          const captured = selection.data ?? grid.getSubRect(selection.x, selection.y, selection.w, selection.h);
+          // Erase source region only if we're lifting fresh (no existing float)
+          if (!selection.data) {
+            const erased = grid.clone();
+            for (let r = 0; r < selection.h; r++) {
+              for (let c = 0; c < selection.w; c++) {
+                erased.set(selection.x + c, selection.y + r, 0);
+              }
+            }
+            commitGridState(erased);
+          }
+          floatingSelDragStart.current = coords;
+          floatingSelOrigin.current = { x: selection.x, y: selection.y };
+          setSelection({ ...selection, data: captured });
+          setIsDrawing(true);
+          setStartPos(coords);
+          setDragCurrentPos(coords);
+        }
+        return;
+      } else if (selection.data) {
+        // Clicking outside a floating selection → stamp it down opaquely first
+        const stamped = grid.clone();
+        stamped.blit(selection.data, selection.x, selection.y, false); // transparentZero=false → opaque
+        commitGridState(stamped);
+        setSelection(null);
+        floatingSelDragStart.current = null;
+        floatingSelOrigin.current = null;
+        additiveSelectionBase.current = null;
+        // Fall through to start a new selection below
+      }
+    }
+
+    // Shift key (outside of select tool) enables rapid selection switch
+    if (e.shiftKey && activeTool !== 'select') {
       setActiveTool('select');
       setIsDrawing(true);
       setStartPos(coords);
       setDragCurrentPos(coords);
       setSelection({ x: coords.x, y: coords.y, w: 1, h: 1, active: true });
+      additiveSelectionBase.current = null;
       return;
     }
 
@@ -379,6 +453,7 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
       floodFill(temp, coords.x, coords.y, val);
       commitGridState(temp);
     } else if (activeTool === 'select') {
+      additiveSelectionBase.current = null;
       setSelection({ x: coords.x, y: coords.y, w: 1, h: 1, active: true });
     }
   };
@@ -409,11 +484,33 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
         commitGridState(temp);
       }
     } else if (activeTool === 'select' && startPos) {
-      const minX = Math.min(startPos.x, coords.x);
-      const minY = Math.min(startPos.y, coords.y);
-      const w = Math.abs(coords.x - startPos.x) + 1;
-      const h = Math.abs(coords.y - startPos.y) + 1;
-      setSelection({ x: minX, y: minY, w, h, active: true });
+      // If we're moving a floating selection, translate its position
+      if (floatingSelDragStart.current && floatingSelOrigin.current && selection?.data) {
+        const dx = coords.x - floatingSelDragStart.current.x;
+        const dy = coords.y - floatingSelDragStart.current.y;
+        setSelection((prev) =>
+          prev ? { ...prev, x: floatingSelOrigin.current!.x + dx, y: floatingSelOrigin.current!.y + dy } : prev
+        );
+        return;
+      }
+
+      // Otherwise resize the marquee rect
+      const dragMinX = Math.min(startPos.x, coords.x);
+      const dragMinY = Math.min(startPos.y, coords.y);
+      const dragMaxX = Math.max(startPos.x, coords.x);
+      const dragMaxY = Math.max(startPos.y, coords.y);
+
+      if (additiveSelectionBase.current) {
+        // Union bounding box of base + current drag rect
+        const base = additiveSelectionBase.current;
+        const unionMinX = Math.min(dragMinX, base.x);
+        const unionMinY = Math.min(dragMinY, base.y);
+        const unionMaxX = Math.max(dragMaxX, base.x + base.w - 1);
+        const unionMaxY = Math.max(dragMaxY, base.y + base.h - 1);
+        setSelection({ x: unionMinX, y: unionMinY, w: unionMaxX - unionMinX + 1, h: unionMaxY - unionMinY + 1, active: true });
+      } else {
+        setSelection({ x: dragMinX, y: dragMinY, w: dragMaxX - dragMinX + 1, h: dragMaxY - dragMinY + 1, active: true });
+      }
     }
   };
 
@@ -470,6 +567,11 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
     setIsDrawing(false);
     setStartPos(null);
     setDragCurrentPos(null);
+
+    // Clear move-drag refs; the floating selection remains until stamped (click outside)
+    floatingSelDragStart.current = null;
+    floatingSelOrigin.current = null;
+    additiveSelectionBase.current = null;
   };
 
   // Zoom with mouse wheel centered at cursor
