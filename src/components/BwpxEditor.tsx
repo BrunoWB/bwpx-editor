@@ -36,6 +36,19 @@ import {
   Copy,
 } from 'lucide-react';
 
+export const KofiIcon = ({ size = 16, className = '' }: { size?: number; className?: string }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.238-.209-.344-.319-1.206-1.261-2.91-3.69-2.91-3.69s-.733-1.09-.272-2.146c.465-1.055 1.579-1.328 2.378-1.024.798.304 1.344 1.092 1.344 1.092s.546-.788 1.344-1.092c.799-.304 1.913-.031 2.378 1.024.461 1.056-.272 2.146-.272 2.146l.405.01zm5.286-.967c-.206 1.37-1.144 1.705-1.993 1.745V7.472c.849.04 1.787.375 1.993 1.745z" />
+  </svg>
+);
+
 export type ToolType =
   | 'pencil'
   | 'eraser'
@@ -854,6 +867,17 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
           >
             <Maximize2 className="w-4 h-4" />
           </button>
+
+          <a
+            href="https://ko-fi.com/brunowb"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded hover:bg-[#232730] text-[#00e5a3] hover:text-[#10f0b0] transition flex items-center justify-center"
+            title="Support me on Ko-fi"
+            aria-label="Support me on Ko-fi"
+          >
+            <KofiIcon size={16} />
+          </a>
         </div>
       </header>
 
@@ -1075,6 +1099,18 @@ export const BwpxEditor: React.FC<BwpxEditorProps> = ({
           <span>
             Zoom: <strong className="text-[#e2e8f0]">{zoom * 100}%</strong>
           </span>
+          <div className="h-3 w-[1px] bg-[#232730]" />
+          <a
+            href="https://ko-fi.com/brunowb"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[#717d91] hover:text-[#00e5a3] transition text-[11px]"
+            title="Support me on Ko-fi"
+            aria-label="Support me on Ko-fi"
+          >
+            <KofiIcon size={12} />
+            <span>Tip</span>
+          </a>
         </div>
       </footer>
 
